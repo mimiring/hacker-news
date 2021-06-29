@@ -1,9 +1,25 @@
-const container = document.getElementById("root");
-const ajax = new XMLHttpRequest();
-// const content = document.createElement("div");
+type Store = {
+  currentPage: number;
+  feeds: NewsFeed[];
+  lastPage: number;
+};
+
+type NewsFeed = {
+  id: number;
+  comments_count: number;
+  url: string;
+  user: string;
+  time_ago: string;
+  points: number;
+  title: string;
+  read?: boolean;
+};
+
+const container: HTMLElement | null = document.getElementById("root");
+const ajax: XMLHttpRequest = new XMLHttpRequest();
 const NEWS_URL = "https://api.hnpwa.com/v0/news/1.json";
 const CONTENT_URL = "https://api.hnpwa.com/v0/item/@id.json";
-const store = {
+const store: Store = {
   currentPage: 1,
   feeds: [],
   lastPage: 0,
@@ -24,10 +40,18 @@ function makeFeed(feeds) {
   return feeds;
 }
 
-function newsFeed(pageNumber) {
-  let newsFeed = store.feeds;
+function updateView(html) {
+  if (container) {
+    container.innerHTML = html;
+  } else {
+    console.error("최상위 컨테이너가 없어 UI를 진행하지 못합니다.");
+  }
+}
 
+function newsFeed(pageNumber) {
+  let newsFeed: NewsFeed[] = store.feeds;
   const newsList = [];
+
   let template = `
     <div class="bg-gray-600 min-h-screen">
       <div class="bg-white text-xl">
@@ -97,7 +121,7 @@ function newsFeed(pageNumber) {
     store.currentPage < store.lastPage ? store.currentPage + 1 : store.lastPage
   );
 
-  container.innerHTML = template;
+  updateView(template);
 }
 
 function newsDetail(id) {
@@ -158,9 +182,8 @@ function newsDetail(id) {
     return commentString.join("");
   }
 
-  container.innerHTML = template.replace(
-    "{{__comments__}}",
-    makeComment(newsContent.comments)
+  updateView(
+    template.replace("{{__comments__}}", makeComment(newsContent.comments))
   );
 }
 
