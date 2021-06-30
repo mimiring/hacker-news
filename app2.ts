@@ -4,15 +4,28 @@ type Store = {
   lastPage: number;
 };
 
-type NewsFeed = {
+type News = {
   id: number;
-  comments_count: number;
+  time_ago: string;
+  title: string;
   url: string;
   user: string;
-  time_ago: string;
+  content: string;
+};
+
+type NewsFeed = News & {
+  comments_count: number;
   points: number;
-  title: string;
   read?: boolean;
+};
+
+type NewsDetail = News & {
+  comments: [];
+};
+
+type NewsComment = News & {
+  comments: NewsComment[];
+  level: number;
 };
 
 const container: HTMLElement | null = document.getElementById("root");
@@ -25,14 +38,14 @@ const store: Store = {
   lastPage: 0,
 };
 
-function getData(url) {
+function getData<AjaxResponse>(url: string): AjaxResponse {
   ajax.open("GET", url, false);
   ajax.send();
 
   return JSON.parse(ajax.response);
 }
 
-function makeFeed(feeds) {
+function makeFeed(feeds: NewsFeed[]) {
   for (let i = 0; i < feeds.length; i++) {
     feeds[i].read = false;
   }
@@ -40,7 +53,7 @@ function makeFeed(feeds) {
   return feeds;
 }
 
-function updateView(html) {
+function updateView(html: string): void {
   if (container) {
     container.innerHTML = html;
   } else {
@@ -48,7 +61,7 @@ function updateView(html) {
   }
 }
 
-function newsFeed(pageNumber) {
+function newsFeed(pageNumber: number): void {
   let newsFeed: NewsFeed[] = store.feeds;
   const newsList = [];
 
@@ -78,13 +91,14 @@ function newsFeed(pageNumber) {
   `;
 
   if (newsFeed.length === 0) {
-    newsFeed = store.feeds = makeFeed(getData(NEWS_URL));
+    newsFeed = store.feeds = makeFeed(getData<NewsFeed[]>(NEWS_URL));
     store.lastPage = Math.ceil(newsFeed.length / 10);
   }
   if (pageNumber < 1 || pageNumber > store.lastPage) {
     throw new Error("유효하지 않은 페이지입니다");
   }
 
+  console.log(store.currentPage);
   for (let i = (store.currentPage - 1) * 10; i < store.currentPage * 10; i++) {
     newsList.push(`
       <div class="p-6 ${
@@ -114,18 +128,46 @@ function newsFeed(pageNumber) {
   template = template.replace("{{__newsFeed__}}", newsList.join(""));
   template = template.replace(
     "{{__prevPage__}}",
-    store.currentPage > 1 ? store.currentPage - 1 : 1
+    String(store.currentPage > 1 ? store.currentPage - 1 : 1)
   );
   template = template.replace(
     "{{__nextPage__}}",
-    store.currentPage < store.lastPage ? store.currentPage + 1 : store.lastPage
+    String(
+      store.currentPage < store.lastPage
+        ? store.currentPage + 1
+        : store.lastPage
+    )
   );
 
   updateView(template);
 }
 
-function newsDetail(id) {
-  const newsContent = getData(CONTENT_URL.replace("@id", id));
+function makeComment(comments: NewsComment[]): string {
+  const commentString = [];
+
+  for (let i = 0; i < comments.length; i++) {
+    const comment: NewsComment = comments[i];
+
+    commentString.push(`
+      <div style="padding-left: ${comment.level * 40}px;" class="mt-4">
+        <div class="text-gray-400">
+          <i class="fa fa-sort-up mr-2"></i>
+          <strong>${comment.user}</strong> ${comment.time_ago}
+        </div>
+        <p class="text-gray-700">${comment.content}</p>
+      </div>     
+    `);
+
+    if (comment.comments.length > 0) {
+      commentString.push(makeComment(comment.comments));
+    }
+  }
+
+  return commentString.join("");
+}
+
+function newsDetail(id: string): void {
+  const newsContent = getData<NewsDetail>(CONTENT_URL.replace("@id", id));
   let template = `
     <div class="bg-gray-600 min-h-screen pb-8">
       <div class="bg-white text-xl">
@@ -160,38 +202,18 @@ function newsDetail(id) {
     }
   }
 
-  function makeComment(comments, called = 0) {
-    const commentString = [];
-
-    for (let i = 0; i < comments.length; i++) {
-      commentString.push(`
-        <div style="padding-left: ${called * 40}px;" class="mt-4">
-          <div class="text-gray-400">
-            <i class="fa fa-sort-up mr-2"></i>
-            <strong>${comments[i].user}</strong> ${comments[i].time_ago}
-          </div>
-          <p class="text-gray-700">${comments[i].content}</p>
-        </div>     
-      `);
-
-      if (comments[i].comments.length > 0) {
-        commentString.push(makeComment(comments[i].comments, called + 1));
-      }
-    }
-
-    return commentString.join("");
-  }
-
   updateView(
     template.replace("{{__comments__}}", makeComment(newsContent.comments))
   );
 }
 
-function errorPage(message) {
-  container.innerHTML = `
-  <h3>404 NOT Found</h3>
-  ${message ? `<div>${message}</div>` : ""}
-  `;
+function errorPage(message?: string) {
+  if (container !== null) {
+    container.innerHTML = `
+      <h3>404 NOT Found</h3>
+      ${message ? `<div>${message}</div>` : ""}
+    `;
+  }
 }
 
 function router() {
@@ -199,16 +221,17 @@ function router() {
   // location hash에 #만 들어있을 경우 빈값을 반환함
 
   if (routePath === "") {
-    newsFeed();
-  } else if (routePath.includes("#/page/")) {
+    newsFeed(1);
+  } else if (routePath.indexOf("#/page/") >= 0) {
     const pageNumber = Number(routePath.substr(7));
     try {
       newsFeed(pageNumber);
+      store.currentPage = pageNumber;
     } catch (error) {
       errorPage(error.message);
       console.log(error.name + ": " + error.message);
     }
-  } else if (routePath.includes("#/show/")) {
+  } else if (routePath.indexOf("#/show/") >= 0) {
     const id = location.hash.substr(7);
     try {
       newsDetail(id);
