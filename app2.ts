@@ -38,34 +38,47 @@ const store: Store = {
   lastPage: 0,
 };
 
+function applyApiMixins(targetClass: any, baseClasses: any[]): void {
+  baseClasses.forEach((baseClass) => {
+    Object.getOwnPropertyNames(baseClass.prototype).forEach((name) => {
+      const descriper = Object.getOwnPropertyDescriptor(
+        baseClass.prototype,
+        name
+      );
+
+      if (descriper) {
+        Object.defineProperty(targetClass.prototype, name, descriper);
+      }
+    });
+  });
+}
+
 class Api {
-  url: string;
-  ajax: XMLHttpRequest;
+  getRequest<AjaxResponse>(url: string): AjaxResponse {
+    const ajax = new XMLHttpRequest();
+    ajax.open("GET", url, false);
+    ajax.send();
 
-  constructor(url: string) {
-    this.url = url;
-    this.ajax = new XMLHttpRequest();
-  }
-
-  protected getRequest<AjaxResponse>(): AjaxResponse {
-    this.ajax.open("GET", this.url, false);
-    this.ajax.send();
-
-    return JSON.parse(this.ajax.response);
+    return JSON.parse(ajax.response);
   }
 }
 
-class NewsFeedApi extends Api {
+class NewsFeedApi {
   getData(): NewsFeed[] {
-    return this.getRequest<NewsFeed[]>();
+    return this.getRequest<NewsFeed[]>(NEWS_URL);
   }
 }
 
-class NewsDetailApi extends Api {
-  getData(): NewsDetail {
-    return this.getRequest<NewsDetail>();
+class NewsDetailApi {
+  getData(id: string): NewsDetail {
+    return this.getRequest<NewsDetail>(CONTENT_URL.replace("@id", id));
   }
 }
+
+interface NewsFeedApi extends Api {}
+interface NewsDetailApi extends Api {}
+applyApiMixins(NewsFeedApi, [Api]);
+applyApiMixins(NewsDetailApi, [Api]);
 
 function makeFeed(feeds: NewsFeed[]) {
   for (let i = 0; i < feeds.length; i++) {
@@ -84,7 +97,7 @@ function updateView(html: string): void {
 }
 
 function newsFeed(pageNumber: number): void {
-  const api = new NewsFeedApi(NEWS_URL);
+  const api = new NewsFeedApi();
   let newsFeed: NewsFeed[] = store.feeds;
   const newsList = [];
 
@@ -121,7 +134,6 @@ function newsFeed(pageNumber: number): void {
     throw new Error("유효하지 않은 페이지입니다");
   }
 
-  console.log(store.currentPage);
   for (let i = (store.currentPage - 1) * 10; i < store.currentPage * 10; i++) {
     newsList.push(`
       <div class="p-6 ${
@@ -190,8 +202,8 @@ function makeComment(comments: NewsComment[]): string {
 }
 
 function newsDetail(id: string): void {
-  const api = new NewsDetailApi(CONTENT_URL.replace("@id", id));
-  const newsContent = api.getData();
+  const api = new NewsDetailApi();
+  const newsContent: NewsDetail = api.getData(id);
   let template = `
     <div class="bg-gray-600 min-h-screen pb-8">
       <div class="bg-white text-xl">
@@ -243,14 +255,13 @@ function errorPage(message?: string) {
 function router() {
   const routePath = location.hash;
   // location hash에 #만 들어있을 경우 빈값을 반환함
-
   if (routePath === "") {
     newsFeed(1);
   } else if (routePath.indexOf("#/page/") >= 0) {
     const pageNumber = Number(routePath.substr(7));
     try {
-      newsFeed(pageNumber);
       store.currentPage = pageNumber;
+      newsFeed(pageNumber);
     } catch (error) {
       errorPage(error.message);
       console.log(error.name + ": " + error.message);
