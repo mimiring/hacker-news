@@ -28,6 +28,11 @@ interface NewsComment extends News {
   readonly level: number;
 }
 
+interface RouteInfo {
+  path: string;
+  page: View;
+}
+
 const container: HTMLElement | null = document.getElementById("root");
 const ajax: XMLHttpRequest = new XMLHttpRequest();
 const NEWS_URL = "https://api.hnpwa.com/v0/news/1.json";
@@ -62,24 +67,24 @@ class Api {
     this.url = url;
   }
 
-  getRequest<AjaxResponse>(url: string): AjaxResponse {
+  getRequest<AjaxResponse>(): AjaxResponse {
     const ajax = new XMLHttpRequest();
-    ajax.open("GET", url, false);
+    ajax.open("GET", this.url, false);
     ajax.send();
 
     return JSON.parse(ajax.response);
   }
 }
 
-class NewsFeedApi {
+class NewsFeedApi extends Api {
   getData(): NewsFeed[] {
-    return this.getRequest<NewsFeed[]>(NEWS_URL);
+    return this.getRequest<NewsFeed[]>();
   }
 }
 
 class NewsDetailApi extends Api {
   getData(): NewsDetail {
-    return this.getRequest<NewsDetail>(CONTENT_URL.replace("@id", id));
+    return this.getRequest<NewsDetail>();
   }
 }
 
@@ -88,11 +93,13 @@ interface NewsDetailApi extends Api {}
 applyApiMixins(NewsFeedApi, [Api]);
 applyApiMixins(NewsDetailApi, [Api]);
 
-class View {
-  template: string;
-  renderTemplate: string;
-  container: HTMLElement;
-  htmlList: string[];
+abstract class View {
+  // abstract : 추상적인 클래스 정의
+  // private은 자식 요소에서도 접근할 수 없게 해줌
+  private template: string;
+  private renderTemplate: string;
+  private container: HTMLElement;
+  private htmlList: string[];
 
   constructor(containerId: string, template: string) {
     const containerElement = document.getElementById(containerId);
@@ -107,32 +114,68 @@ class View {
     this.htmlList = [];
   }
 
-  updateView(): void {
+  protected updateView(): void {
     this.container.innerHTML = this.renderTemplate;
     this.renderTemplate = this.template;
   }
 
-  addHtml(htmlString: string): void {
+  protected addHtml(htmlString: string): void {
     this.htmlList.push(htmlString);
   }
 
-  getHtml(): string {
+  protected getHtml(): string {
     const snapshot = this.htmlList.join("");
     this.clearHtmlList();
     return snapshot;
   }
 
-  setTemplateData(key: string, value: string): void {
+  protected setTemplateData(key: string, value: string): void {
     this.renderTemplate = this.renderTemplate.replace(`{{__${key}__}}`, value);
   }
 
-  clearHtmlList() {
+  private clearHtmlList() {
     this.htmlList = [];
+  }
+
+  abstract render(): void;
+}
+
+class Router {
+  routeTable: RouteInfo[];
+  defaultRoute: RouteInfo | null;
+
+  constructor() {
+    window.addEventListener("hashchange", this.route.bind(this)); // route가 Route의 인스턴스가 아닌 window.EventListner의 인스턴스이므로 고정시켜줘야 함
+
+    this.routeTable = [];
+    this.defaultRoute = null;
+  }
+
+  setDefaultPage(page: View): void {
+    this.defaultRoute = { path: "", page };
+  }
+
+  addRoutePath(path: string, page: View): void {
+    this.routeTable.push({ path, page });
+  }
+
+  route() {
+    const routePath = location.hash;
+    if (routePath === "" && this.defaultRoute) {
+      this.defaultRoute.page.render();
+    }
+
+    for (const routeInfo of this.routeTable) {
+      if (routePath.indexOf(routeInfo.path) >= 0) {
+        routeInfo.page.render();
+        break;
+      }
+    }
   }
 }
 class NewsFeedView extends View {
-  api: NewsFeedApi;
-  feeds: NewsFeed[];
+  private api: NewsFeedApi;
+  private feeds: NewsFeed[];
 
   constructor(containerId: string) {
     let template: string = `
@@ -155,27 +198,29 @@ class NewsFeedView extends View {
         </div>
       </div>
       <div class="p-4 text-2xl text-gray-700">
-        {{__newsFeed__}}        
+        {{__news_feed__}}        
       </div>
     </div>
     `;
 
     super(containerId, template);
-    this.api = new NewsFeedApi();
+    this.api = new NewsFeedApi(NEWS_URL);
     this.feeds = store.feeds;
 
     if (this.feeds.length === 0) {
       this.feeds = store.feeds = this.api.getData();
       this.makeFeed();
-      store.lastPage = Math.ceil(newsFeed.length / 10);
+      store.lastPage = Math.ceil(this.feeds.length / 10);
     }
 
-    if (pageNumber < 1 || pageNumber > store.lastPage) {
+    if (store.currentPage < 1 || store.currentPage > store.lastPage) {
       throw new Error("유효하지 않은 페이지입니다");
     }
   }
 
   render(): void {
+    store.currentPage = Number(location.hash.substr(7) || 1);
+
     for (
       let i = (store.currentPage - 1) * 10;
       i < store.currentPage * 10;
@@ -209,6 +254,7 @@ class NewsFeedView extends View {
     }
 
     this.setTemplateData("news_feed", this.getHtml());
+    console.log(this.getHtml());
     this.setTemplateData(
       "prevPage",
       String(store.currentPage > 1 ? store.currentPage - 1 : 1)
@@ -216,16 +262,16 @@ class NewsFeedView extends View {
     this.setTemplateData(
       "nextPage",
       String(
-        store.currentPage < store.lastPage
-          ? store.currentPage + 1
-          : store.lastPage
+        store.currentPage + 1 > store.lastPage
+          ? store.lastPage
+          : store.currentPage
       )
     );
 
     this.updateView();
   }
 
-  makeFeed(): void {
+  private makeFeed(): void {
     for (let i = 0; i < this.feeds.length; i++) {
       this.feeds[i].read = false;
     }
@@ -305,89 +351,6 @@ class NewsDetailView extends View {
   }
 }
 
-function newsFeed(pageNumber: number): void {
-  const api = new NewsFeedApi();
-  let newsFeed: NewsFeed[] = store.feeds;
-  const newsList = [];
-
-  let template = `
-    <div class="bg-gray-600 min-h-screen">
-      <div class="bg-white text-xl">
-        <div class="mx-auto px-4">
-          <div class="flex justify-between items-center py-6">
-            <div class="flex justify-start">
-              <h1 class="font-extrabold">Hacker News</h1>
-            </div>
-            <div class="items-center justify-end">
-              <a href="#/page/{{__prevPage__}}" class="text-gray-500">
-                Previous
-              </a>
-              <a href="#/page/{{__nextPage__}}" class="text-gray-500 ml-4">
-                Next
-              </a>
-            </div>
-          </div> 
-        </div>
-      </div>
-      <div class="p-4 text-2xl text-gray-700">
-        {{__newsFeed__}}        
-      </div>
-    </div>
-  `;
-
-  if (newsFeed.length === 0) {
-    newsFeed = store.feeds = makeFeed(api.getData());
-    store.lastPage = Math.ceil(newsFeed.length / 10);
-  }
-  if (pageNumber < 1 || pageNumber > store.lastPage) {
-    throw new Error("유효하지 않은 페이지입니다");
-  }
-
-  for (let i = (store.currentPage - 1) * 10; i < store.currentPage * 10; i++) {
-    newsList.push(`
-      <div class="p-6 ${
-        newsFeed[i].read ? "bg-red-500" : "bg-white"
-      } mt-6 rounded-lg shadow-md transition-colors duration-500 hover:bg-green-100">
-        <div class="flex">
-          <div class="flex-auto">
-            <a href="#/show/${newsFeed[i].id}">${newsFeed[i].title}</a>  
-          </div>
-          <div class="text-center text-sm">
-            <div class="w-10 text-white bg-green-300 rounded-lg px-0 py-2">
-              ${newsFeed[i].comments_count}
-            </div>
-          </div>
-        </div>
-        <div class="flex mt-3">
-          <div class="grid grid-cols-3 text-sm text-gray-500">
-            <div><i class="fas fa-user mr-1"></i>${newsFeed[i].user}</div>
-            <div><i class="fas fa-heart mr-1"></i>${newsFeed[i].points}</div>
-            <div><i class="far fa-clock mr-1"></i>${newsFeed[i].time_ago}</div>
-          </div>  
-        </div>
-      </div>    
-    `);
-  }
-
-  template = template.replace("{{__newsFeed__}}", newsList.join(""));
-  template = template.replace(
-    "{{__prevPage__}}",
-    String(store.currentPage > 1 ? store.currentPage - 1 : 1)
-  );
-  template = template.replace(
-    "{{__nextPage__}}",
-    String(
-      store.currentPage < store.lastPage
-        ? store.currentPage + 1
-        : store.lastPage
-    )
-  );
-
-  updateView(template);
-}
-
-function N(id: string): void {}
-
 function errorPage(message?: string) {
   if (container !== null) {
     container.innerHTML = `
@@ -397,31 +360,13 @@ function errorPage(message?: string) {
   }
 }
 
-function router() {
-  const routePath = location.hash;
-  // location hash에 #만 들어있을 경우 빈값을 반환함
-  if (routePath === "") {
-    newsFeed(1);
-  } else if (routePath.indexOf("#/page/") >= 0) {
-    const pageNumber = Number(routePath.substr(7));
-    try {
-      store.currentPage = pageNumber;
-      newsFeed(pageNumber);
-    } catch (error) {
-      errorPage(error.message);
-      console.log(error.name + ": " + error.message);
-    }
-  } else if (routePath.indexOf("#/show/") >= 0) {
-    const id = location.hash.substr(7);
-    try {
-      N(id);
-    } catch (error) {
-      errorPage();
-    }
-  } else {
-    errorPage();
-  }
-}
+const router: Router = new Router();
+const newsFeedView = new NewsFeedView("root");
+const newsDetailView = new NewsDetailView("root");
 
-window.addEventListener("hashchange", router);
-router();
+router.setDefaultPage(newsFeedView);
+
+router.addRoutePath("/page/", newsFeedView);
+router.addRoutePath("/show/", newsDetailView);
+
+router.route();
