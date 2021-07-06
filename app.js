@@ -80,6 +80,7 @@ function newsFeed() {
     `);
   }
 
+  console.log(store.currentPage);
   template = template.replace("{{__news_feed__}}", newsList.join(""));
   template = template.replace(
     "{{__prev_page__}}",
